@@ -1,0 +1,10 @@
+[local]
+address = 127.0.0.1:6060
+
+[tunnel]
+address = your.vps.server:22
+user = john
+password = johnspassword
+ipv6 = true
+zones = ipinfo.io, \
+	example.com
