@@ -84,7 +84,10 @@ type dialer struct {
 
 func (d dialer) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
 	name, ok := ctx.Value(nameKey).(string)
-	if ok && d.Tunnel.Contains(name) {
+	if !ok {
+		name = addr
+	}
+	if d.Tunnel.Contains(name) {
 		log.Printf("Tunnel: %s", name)
 		return d.Tunnel.Dial(ctx, network, addr)
 	}
