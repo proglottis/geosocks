@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/armon/go-socks5"
 	"golang.org/x/crypto/ssh"
@@ -22,15 +23,17 @@ const (
 )
 
 type tunnel struct {
-	Network string
-	Address string
-	Config  *ssh.ClientConfig
-	IPV6    bool
+	Network     string
+	Address     string
+	Config      *ssh.ClientConfig
+	IPV6        bool
+	IdleTimeout time.Duration
 
 	zones []string
 
 	mu     sync.Mutex
 	client *ssh.Client
+	timer  *time.Timer
 }
 
 func (t *tunnel) getClient() (*ssh.Client, error) {
@@ -38,14 +41,20 @@ func (t *tunnel) getClient() (*ssh.Client, error) {
 	defer t.mu.Unlock()
 	var err error
 	if t.client == nil {
+		log.Printf("tunnel: Opening SSH connection")
 		t.client, err = ssh.Dial(t.Network, t.Address, t.Config)
+		t.timer = time.AfterFunc(t.IdleTimeout, t.removeClient)
 	}
+	t.timer.Reset(t.IdleTimeout)
 	return t.client, err
 }
 
 func (t *tunnel) removeClient() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	log.Printf("tunnel: Closing SSH connection")
+	t.timer.Stop()
+	t.client.Close()
 	t.client = nil
 }
 
@@ -88,10 +97,10 @@ func (d dialer) Dial(ctx context.Context, network, addr string) (net.Conn, error
 		name = addr
 	}
 	if d.Tunnel.Contains(name) {
-		log.Printf("Tunnel: %s", name)
+		log.Printf("dialer: Tunnel: %s", name)
 		return d.Tunnel.Dial(ctx, network, addr)
 	}
-	log.Printf("Direct: %s", name)
+	log.Printf("dialer: Direct: %s", name)
 	return d.Dialer(network, addr)
 }
 
@@ -131,10 +140,11 @@ func newTunnel(cfg *ini.Section) *tunnel {
 		auth = append(auth, ssh.PublicKeysCallback(agent.NewClient(sshAgent).Signers))
 	}
 	t := &tunnel{
-		Network: "tcp",
-		Address: cfg.Key("address").String(),
-		Config:  &ssh.ClientConfig{User: cfg.Key("user").String(), Auth: auth},
-		IPV6:    cfg.Key("ipv6").MustBool(),
+		Network:     "tcp",
+		Address:     cfg.Key("address").String(),
+		Config:      &ssh.ClientConfig{User: cfg.Key("user").String(), Auth: auth},
+		IPV6:        cfg.Key("ipv6").MustBool(),
+		IdleTimeout: cfg.Key("idle_timeout").MustDuration(30 * time.Minute),
 	}
 	for _, zone := range cfg.Key("zones").Strings(",") {
 		t.AddZone(zone)
