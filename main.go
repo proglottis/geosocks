@@ -53,6 +53,9 @@ func (t *tunnel) removeClient() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	log.Printf("tunnel: Closing SSH connection")
+	if t.client == nil {
+		return
+	}
 	t.timer.Stop()
 	t.client.Close()
 	t.client = nil
