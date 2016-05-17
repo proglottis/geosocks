@@ -22,11 +22,39 @@ const (
 	nameKey key = iota
 )
 
+type ipv6Option int
+
+const (
+	defaultIPV6 ipv6Option = iota
+	preferIPV6
+	forceIPV6
+)
+
+func parseIPV6Option(str string) (ipv6Option, error) {
+	switch strings.ToLower(str) {
+	case "0", "f", "false", "no", "n", "off", "default":
+		return defaultIPV6, nil
+	case "1", "t", "true", "yes", "y", "on", "prefer":
+		return preferIPV6, nil
+	case "force":
+		return forceIPV6, nil
+	}
+	return defaultIPV6, errors.New("invalid IPV6 option")
+}
+
+func mustParseIPV6Option(str string) ipv6Option {
+	val, err := parseIPV6Option(str)
+	if err != nil {
+		panic(err)
+	}
+	return val
+}
+
 type tunnel struct {
 	Network     string
 	Address     string
 	Config      *ssh.ClientConfig
-	IPV6        bool
+	IPV6        ipv6Option
 	IdleTimeout time.Duration
 
 	zones []string
@@ -117,21 +145,23 @@ func (r resolver) Resolve(ctx context.Context, name string) (context.Context, ne
 	if err != nil {
 		return ctx, nil, err
 	}
-	if r.preferIPV6(name) {
-		for _, ip := range ips {
-			if ip.To4() == nil {
-				return ctx, ip, nil
+	var ipv6 ipv6Option
+	if r.Tunnel.Contains(name) {
+		ipv6 = r.Tunnel.IPV6
+		if ipv6 == preferIPV6 || ipv6 == forceIPV6 {
+			for _, ip := range ips {
+				if ip.To4() == nil {
+					return ctx, ip, nil
+				}
 			}
 		}
 	}
-	for _, ip := range ips {
-		return ctx, ip, nil
+	if ipv6 != forceIPV6 {
+		for _, ip := range ips {
+			return ctx, ip, nil
+		}
 	}
 	return ctx, nil, errors.New("could not resolve")
-}
-
-func (r resolver) preferIPV6(name string) bool {
-	return r.Tunnel.Contains(name) && r.Tunnel.IPV6
 }
 
 func newTunnel(cfg *ini.Section) *tunnel {
@@ -146,7 +176,7 @@ func newTunnel(cfg *ini.Section) *tunnel {
 		Network:     "tcp",
 		Address:     cfg.Key("address").String(),
 		Config:      &ssh.ClientConfig{User: cfg.Key("user").String(), Auth: auth},
-		IPV6:        cfg.Key("ipv6").MustBool(),
+		IPV6:        mustParseIPV6Option(cfg.Key("ipv6").MustString("no")),
 		IdleTimeout: cfg.Key("idle_timeout").MustDuration(30 * time.Minute),
 	}
 	for _, zone := range cfg.Key("zones").Strings(",") {
